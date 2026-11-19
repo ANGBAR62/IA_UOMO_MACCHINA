@@ -12,13 +12,16 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Verifica presenza API Key
 if "GEMINI_API_KEY" not in st.secrets:
     st.error("API Key non configurata nei Secrets di Streamlit.")
     st.stop()
 
-# Inizializzazione nuovo client Google GenAI
-client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+# Memorizza il client per non ricrearlo ad ogni messaggio
+@st.cache_resource
+def get_client():
+    return genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+
+client = get_client()
 
 # ---------------------------------------------------------
 # DATABASE PERSONAGGI E SYSTEM PROMPTS
@@ -81,50 +84,52 @@ scelta_personaggio = st.selectbox(
 info_char = PERSONAGGI[scelta_personaggio]
 st.info(f"{info_char['avatar']} **{scelta_personaggio}** — *{info_char['ruolo']}*")
 
-# Reset automatico dello storico se si cambia personaggio
 if "current_char" not in st.session_state or st.session_state.current_char != scelta_personaggio:
     st.session_state.current_char = scelta_personaggio
     st.session_state.messages = []
 
-# Visualizzazione storico messaggi
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"], avatar=msg.get("avatar")):
         st.markdown(msg["content"])
 
-# Gestione dell'input dello studente e chiamata all'API
+# Generatore per lo streaming in tempo reale
+def stream_risposta(contents, system_prompt):
+    response = client.models.generate_content_stream(
+        model="gemini-3.5-flash-lite",
+        contents=contents,
+        config=types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            max_output_tokens=200,
+        )
+    )
+    for chunk in response:
+        if chunk.text:
+            yield chunk.text
+
 if prompt := st.chat_input("Scrivi un messaggio..."):
     st.session_state.messages.append({"role": "user", "content": prompt, "avatar": "🎓"})
     with st.chat_message("user", avatar="🎓"):
         st.markdown(prompt)
 
     try:
-        # Ricostruzione storico conversazione per il nuovo SDK
-        contents = []
-        for m in st.session_state.messages:
-            role = "user" if m["role"] == "user" else "model"
-            contents.append(
-                types.Content(
-                    role=role,
-                    parts=[types.Part.from_text(text=m["content"])]
-                )
+        # Limita lo storico agli ultimi 6 messaggi per mantenere veloce l'invio
+        recent_messages = st.session_state.messages[-6:]
+        contents = [
+            types.Content(
+                role="user" if m["role"] == "user" else "model",
+                parts=[types.Part.from_text(text=m["content"])]
             )
+            for m in recent_messages
+        ]
 
-        response = client.models.generate_content(
-            model="gemini-3.5-flash",
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=info_char["prompt"],
-            )
-        )
-        reply_text = response.text
+        with st.chat_message("assistant", avatar=info_char["avatar"]):
+            reply_text = st.write_stream(stream_risposta(contents, info_char["prompt"]))
 
         st.session_state.messages.append({
             "role": "assistant", 
             "content": reply_text, 
             "avatar": info_char["avatar"]
         })
-        with st.chat_message("assistant", avatar=info_char["avatar"]):
-            st.markdown(reply_text)
 
     except Exception as e:
         st.error(f"Errore di connessione: {str(e)}")
