@@ -1,5 +1,6 @@
 import streamlit as st
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 # ---------------------------------------------------------
 # CONFIGURAZIONE PAGINA MOBILE
@@ -16,7 +17,8 @@ if "GEMINI_API_KEY" not in st.secrets:
     st.error("API Key non configurata nei Secrets di Streamlit.")
     st.stop()
 
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+# Inizializzazione nuovo client Google GenAI
+client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
 # ---------------------------------------------------------
 # DATABASE PERSONAGGI E SYSTEM PROMPTS
@@ -96,19 +98,24 @@ if prompt := st.chat_input("Scrivi un messaggio..."):
         st.markdown(prompt)
 
     try:
-        model = genai.GenerativeModel(
-            model_name="gemini-3.8-flash",
-            system_instruction=info_char["prompt"]
-        )
-        
-        # Ricostruzione storico conversazione
-        history_gemini = []
-        for m in st.session_state.messages[:-1]:
+        # Ricostruzione storico conversazione per il nuovo SDK
+        contents = []
+        for m in st.session_state.messages:
             role = "user" if m["role"] == "user" else "model"
-            history_gemini.append({"role": role, "parts": [m["content"]]})
-        
-        chat = model.start_chat(history=history_gemini)
-        response = chat.send_message(prompt)
+            contents.append(
+                types.Content(
+                    role=role,
+                    parts=[types.Part.from_text(text=m["content"])]
+                )
+            )
+
+        response = client.models.generate_content(
+            model="gemini-3.5-flash",
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=info_char["prompt"],
+            )
+        )
         reply_text = response.text
 
         st.session_state.messages.append({
