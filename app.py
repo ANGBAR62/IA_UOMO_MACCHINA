@@ -27,7 +27,7 @@ client = get_client()
 # DATABASE PERSONAGGI E SYSTEM PROMPTS
 # ---------------------------------------------------------
 PERSONAGGI = {
-    "Bruno Martelli": {
+    "Bruno Maaartelli": {
         "ruolo": "Musica & Sintetizzatori",
         "avatar": "🎹",
         "prompt": """Sei Bruno Martelli, uno studente di composizione alla High School of Performing Arts di NY. 
