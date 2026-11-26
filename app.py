@@ -15,12 +15,15 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Verifica presenza API Key e inizializzazione client
 if "GEMINI_API_KEY" not in st.secrets:
     st.error("API Key non configurata nei Secrets di Streamlit.")
     st.stop()
 
-client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+# Timeout di 20 secondi per evitare che l'app resti appesa all'infinito
+client = genai.Client(
+    api_key=st.secrets["GEMINI_API_KEY"],
+    http_options={"timeout": 20}
+)
 
 # ---------------------------------------------------------
 # CONFIGURAZIONE PERSONAGGI (METADATI + FILE PROMPT ESTERNI)
@@ -67,69 +70,86 @@ def carica_prompt(nome_file: str) -> str:
 
 @st.cache_data(ttl=3600)
 def ottieni_modelli_disponibili(_client: genai.Client) -> list[str]:
-    """Interroga l'API e restituisce i modelli Gemini attivi ordinati per priorità."""
+    """Recupera al massimo i 3 migliori modelli Gemini attivi e stabili."""
     modelli_validi = []
+    parole_da_escludere = ["image", "tts", "embedding", "vision", "aqa", "exp", "1.0", "1.5", "2.0"]
+
     try:
         for m in _client.models.list():
             azioni = getattr(m, "supported_actions", None) or []
             nome = m.name.replace("models/", "")
-            # Filtra solo i modelli Gemini che supportano la generazione testo
-            if "generateContent" in azioni and "gemini" in nome.lower():
-                # Esclude modelli speciali non adatti alla chat testuale (es. image, tts, embedding)
-                if not any(x in nome.lower() for x in ["image", "tts", "embedding", "vision", "aqa"]):
+            n_low = nome.lower()
+
+            if "generateContent" in azioni and "gemini" in n_low:
+                if not any(x in n_low for x in parole_da_escludere):
                     modelli_validi.append(nome)
     except Exception:
         pass
 
-    # Ordina dando priorità ai modelli Flash più recenti, poi Pro, poi gli altri
     def priorita(nome_modello: str) -> int:
         n = nome_modello.lower()
-        if "flash" in n and "lite" not in n:
+        if "flash" in n and "lite" not in n and "preview" not in n:
             return 0
-        if "flash" in n:
+        if "flash" in n and "lite" not in n:
             return 1
-        if "pro" in n:
+        if "flash" in n:
             return 2
-        return 3
+        if "pro" in n:
+            return 3
+        return 4
 
     modelli_validi.sort(key=priorita)
-    return modelli_validi if modelli_validi else ["gemini-3.8-flash"]
+    # Restituisce al massimo i primi 3 modelli per evitare attese lunghe
+    return modelli_validi[:3] if modelli_validi else ["gemini-3.8-flash"]
 
 
 def genera_risposta_resiliente(
     client: genai.Client,
     contents: list[types.Content],
-    system_prompt: str
+    system_prompt: str,
+    status_placeholder
 ) -> str:
-    """Tenta la generazione sui modelli disponibili con retry automatico e fallback."""
+    """Tenta la generazione sui migliori 3 modelli disponibili con feedback visivo."""
     modelli_da_provare = ottieni_modelli_disponibili(client)
 
     for modello in modelli_da_provare:
-        for tentativo in range(2):
-            try:
-                response = client.models.generate_content(
-                    model=modello,
-                    contents=contents,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_prompt,
-                    ),
-                )
-                return response.text
-            except APIError as e:
-                # 404: modello non supportato -> passa subito al prossimo modello
-                if e.code == 404:
-                    break
-                # 503 (sovraccarico) o 429 (rate limit) -> attende e riprova, poi cambia modello
-                if e.code in (503, 429):
-                    if tentativo == 0:
-                        time.sleep(2)
-                        continue
-                    else:
-                        break
-                raise e
+        status_placeholder.caption(f"⏳ Connessione a `{modello}`...")
+        try:
+            response = client.models.generate_content(
+                model=modello,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                ),
+            )
+            status_placeholder.empty()
+            return response.text
 
+        except APIError as e:
+            # Se sovraccarico (503), fa un solo rapido retry dopo 1.5s, poi cambia modello
+            if e.code == 503:
+                time.sleep(1.5)
+                try:
+                    response = client.models.generate_content(
+                        model=modello,
+                        contents=contents,
+                        config=types.GenerateContentConfig(
+                            system_instruction=system_prompt,
+                        ),
+                    )
+                    status_placeholder.empty()
+                    return response.text
+                except Exception:
+                    continue
+            # Per 404, 429 o altri errori passa subito al modello successivo
+            continue
+        except Exception:
+            # Gestisce eventuali timeout di rete passando al modello successivo
+            continue
+
+    status_placeholder.empty()
     raise RuntimeError(
-        f"Nessun modello ha risposto correttamente (modelli testati: {', '.join(modelli_da_provare)})."
+        f"Nessun modello ha risposto in tempo utile (testati: {', '.join(modelli_da_provare)})."
     )
 
 
@@ -165,27 +185,30 @@ if prompt := st.chat_input("Scrivi un messaggio..."):
         st.markdown(prompt)
 
     with st.chat_message("assistant", avatar=info_char["avatar"]):
-        with st.spinner(f"{scelta_personaggio} sta riflettendo..."):
-            try:
-                system_prompt = carica_prompt(info_char["prompt_file"])
+        status_box = st.empty()
+        try:
+            system_prompt = carica_prompt(info_char["prompt_file"])
 
-                contents_gemini = [
-                    types.Content(
-                        role="user" if m["role"] == "user" else "model",
-                        parts=[types.Part.from_text(text=m["content"])],
-                    )
-                    for m in st.session_state.messages
-                ]
+            contents_gemini = [
+                types.Content(
+                    role="user" if m["role"] == "user" else "model",
+                    parts=[types.Part.from_text(text=m["content"])],
+                )
+                for m in st.session_state.messages
+            ]
 
-                reply_text = genera_risposta_resiliente(client, contents_gemini, system_prompt)
-                st.markdown(reply_text)
+            reply_text = genera_risposta_resiliente(
+                client, contents_gemini, system_prompt, status_box
+            )
+            st.markdown(reply_text)
 
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": reply_text,
-                    "avatar": info_char["avatar"],
-                })
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": reply_text,
+                "avatar": info_char["avatar"],
+            })
 
-            except Exception as e:
-                st.error(f"Errore di connessione: {str(e)}")
-                st.session_state.messages.pop()
+        except Exception as e:
+            status_box.empty()
+            st.error(f"Errore di connessione: {str(e)}")
+            st.session_state.messages.pop()
