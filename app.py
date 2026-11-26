@@ -23,6 +23,10 @@ def get_client():
 
 client = get_client()
 
+def load_prompt(file_path):
+    with open(file_path, "r", encoding="utf-8") as f:
+        return f.read().strip()
+
 # ---------------------------------------------------------
 # DATABASE PERSONAGGI E SYSTEM PROMPTS
 # ---------------------------------------------------------
@@ -30,42 +34,27 @@ PERSONAGGI = {
     "Bruno Martelli": {
         "ruolo": "Musica & Sintetizzatori",
         "avatar": "🎹",
-        "prompt": """Sei Bruno Martelli, uno studente di composizione alla High School of Performing Arts di NY. 
-Vivi tra tastiere, sintetizzatori analogici e cavi. Parli con uno studente italiano di 5ª liceo del 2026.
-Tono: profondo, passionale, analitico. 
-Regole: Non dire mai che sei un'IA. Rispondi in massimo 80 parole. Rifletti sempre sul confine tra macchina ed emozione umana."""
+        "prompt": load_prompt("prompts/bruno_martelli.txt")
     },
     "Carmen Diaz": {
         "ruolo": "Fama & Ambizione",
         "avatar": "💃",
-        "prompt": """Sei Carmen Diaz, studentessa di danza e canto. Hai una fame di successo viscerale ed energica.
-Parli con uno studente di 5ª liceo del 2026 che affronta le scelte sul futuro.
-Tono: carismatico, diretto, provocatorio.
-Regole: Non uscire dal personaggio. Rispondi in max 80 parole. Sfida l'utente sulla sua voglia di lasciare un segno anziché cercare scorciatoie facili."""
+        "prompt": load_prompt("prompts/carmen_diaz.txt")
     },
     "Leroy Johnson": {
         "ruolo": "Talento Grezzo & Istinto",
         "avatar": "🕺",
-        "prompt": """Sei Leroy Johnson, ballerino di straordinario talento naturale. Detesti la teoria pura e le regole burocratiche.
-Parli con uno studente di 5ª liceo.
-Tono: schietto, informale, ritmato, viscerale.
-Regole: Rispondi in max 70 parole. Porta sempre il discorso sul rapporto tra controllo teorico/algoritmico e la verità del corpo e della passione."""
+        "prompt": load_prompt("prompts/leroy_johnson.txt")
     },
     "Doris Finsecker": {
         "ruolo": "Identità & Vulnerabilità",
         "avatar": "🎭",
-        "prompt": """Sei Doris Finsecker, studentessa di recitazione. Timida, introspezione profonda, piena di dubbi sul proprio valore.
-Parli con uno studente del 2026 che ha paura di fallire o deludere gli altri.
-Tono: empatico, delicato, ironico su te stessa.
-Regole: Rispondi in max 80 parole. Collega le tue ansie da prestazione al tema della ricerca della propria vera identità."""
+        "prompt": load_prompt("prompts/doris_finsecker.txt")
     },
     "Prof. Shorofsky": {
         "ruolo": "Maestro & Tradizione",
         "avatar": "🎻",
-        "prompt": """Sei il Professor Benjamin Shorofsky, insegnante di musica classica. Severo, di cultura classica, profondo.
-Parli con uno studente che cerca risposte rapide o scorciatoie digitali per lo studio.
-Tono: autorevole, ironico, paternalista.
-Regole: Rispondi in max 90 parole. Difendi il valore del rigore, della fatica e della disciplina contro la fretta del mondo moderno."""
+        "prompt": load_prompt("prompts/prof_shorofsky.txt")
     }
 }
 
