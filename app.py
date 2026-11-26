@@ -1,9 +1,6 @@
-import time
-from pathlib import Path
 import streamlit as st
 from google import genai
 from google.genai import types
-from google.genai.errors import APIError
 
 # ---------------------------------------------------------
 # CONFIGURAZIONE PAGINA MOBILE
@@ -19,140 +16,58 @@ if "GEMINI_API_KEY" not in st.secrets:
     st.error("API Key non configurata nei Secrets di Streamlit.")
     st.stop()
 
-# NOTA: non passiamo timeout numerici ambigui (in alcune versioni SDK sono in ms!)
-client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+# Memorizza il client per non ricrearlo ad ogni messaggio
+@st.cache_resource
+def get_client():
+    return genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+
+client = get_client()
 
 # ---------------------------------------------------------
-# CONFIGURAZIONE PERSONAGGI (METADATI + FILE PROMPT ESTERNI)
+# DATABASE PERSONAGGI E SYSTEM PROMPTS
 # ---------------------------------------------------------
-PROMPTS_DIR = Path(__file__).parent / "prompts"
-
 PERSONAGGI = {
     "Bruno Martelli": {
         "ruolo": "Musica & Sintetizzatori",
         "avatar": "🎹",
-        "prompt_file": "bruno_martelli.md",
+        "prompt": """Sei Bruno Martelli, uno studente di composizione alla High School of Performing Arts di NY. 
+Vivi tra tastiere, sintetizzatori analogici e cavi. Parli con uno studente italiano di 5ª liceo del 2026.
+Tono: profondo, passionale, analitico. 
+Regole: Non dire mai che sei un'IA. Rispondi in massimo 80 parole. Rifletti sempre sul confine tra macchina ed emozione umana."""
     },
     "Carmen Diaz": {
         "ruolo": "Fama & Ambizione",
         "avatar": "💃",
-        "prompt_file": "carmen_diaz.md",
+        "prompt": """Sei Carmen Diaz, studentessa di danza e canto. Hai una fame di successo viscerale ed energica.
+Parli con uno studente di 5ª liceo del 2026 che affronta le scelte sul futuro.
+Tono: carismatico, diretto, provocatorio.
+Regole: Non uscire dal personaggio. Rispondi in max 80 parole. Sfida l'utente sulla sua voglia di lasciare un segno anziché cercare scorciatoie facili."""
     },
     "Leroy Johnson": {
         "ruolo": "Talento Grezzo & Istinto",
         "avatar": "🕺",
-        "prompt_file": "leroy_johnson.md",
+        "prompt": """Sei Leroy Johnson, ballerino di straordinario talento naturale. Detesti la teoria pura e le regole burocratiche.
+Parli con uno studente di 5ª liceo.
+Tono: schietto, informale, ritmato, viscerale.
+Regole: Rispondi in max 70 parole. Porta sempre il discorso sul rapporto tra controllo teorico/algoritmico e la verità del corpo e della passione."""
     },
     "Doris Finsecker": {
         "ruolo": "Identità & Vulnerabilità",
         "avatar": "🎭",
-        "prompt_file": "doris_finsecker.md",
+        "prompt": """Sei Doris Finsecker, studentessa di recitazione. Timida, introspezione profonda, piena di dubbi sul proprio valore.
+Parli con uno studente del 2026 che ha paura di fallire o deludere gli altri.
+Tono: empatico, delicato, ironico su te stessa.
+Regole: Rispondi in max 80 parole. Collega le tue ansie da prestazione al tema della ricerca della propria vera identità."""
     },
     "Prof. Shorofsky": {
         "ruolo": "Maestro & Tradizione",
         "avatar": "🎻",
-        "prompt_file": "prof_shorofsky.md",
-    },
+        "prompt": """Sei il Professor Benjamin Shorofsky, insegnante di musica classica. Severo, di cultura classica, profondo.
+Parli con uno studente che cerca risposte rapide o scorciatoie digitali per lo studio.
+Tono: autorevole, ironico, paternalista.
+Regole: Rispondi in max 90 parole. Difendi il valore del rigore, della fatica e della disciplina contro la fretta del mondo moderno."""
+    }
 }
-
-
-@st.cache_data
-def carica_prompt(nome_file: str) -> str:
-    """Legge le istruzioni del personaggio dal file Markdown esterno."""
-    percorso = PROMPTS_DIR / nome_file
-    if not percorso.exists():
-        raise FileNotFoundError(f"File prompt non trovato: {percorso}")
-    return percorso.read_text(encoding="utf-8").strip()
-
-
-@st.cache_data(ttl=3600)
-def ottieni_modelli_reali(_client: genai.Client) -> tuple[list[str], str]:
-    """Interroga l'API e restituisce i modelli Gemini reali disponibili sull'account."""
-    modelli_validi = []
-    escludi = ["image", "tts", "embedding", "vision", "aqa", "1.0", "1.5"]
-
-    try:
-        for m in _client.models.list():
-            nome = m.name.replace("models/", "")
-            n_low = nome.lower()
-            # Verifica compatibilità con generateContent (supporta sia supported_actions che supported_generation_methods)
-            azioni = getattr(m, "supported_actions", None) or getattr(m, "supported_generation_methods", None) or []
-            
-            if "gemini" in n_low and not any(x in n_low for x in escludi):
-                if not azioni or "generateContent" in azioni:
-                    modelli_validi.append(nome)
-    except Exception as e:
-        return [], f"Errore durante client.models.list(): {e}"
-
-    def priorita(nome_modello: str) -> int:
-        n = nome_modello.lower()
-        if "flash" in n and "lite" not in n and "preview" not in n and "exp" not in n:
-            return 0
-        if "flash" in n and "lite" not in n:
-            return 1
-        if "flash" in n:
-            return 2
-        if "pro" in n:
-            return 3
-        return 4
-
-    modelli_validi.sort(key=priorita)
-    return modelli_validi[:4], ""
-
-
-def genera_risposta_resiliente(
-    client: genai.Client,
-    contents: list[types.Content],
-    system_prompt: str,
-    status_placeholder
-) -> str:
-    """Tenta la generazione sui modelli reali rilevati e riporta errori dettagliati se fallisce."""
-    modelli_da_provare, err_lista = ottieni_modelli_reali(client)
-
-    if not modelli_da_provare:
-        raise RuntimeError(f"Impossibile recuperare la lista modelli dall'API. Dettaglio: {err_lista}")
-
-    errori_riscontrati = []
-
-    for modello in modelli_da_provare:
-        status_placeholder.caption(f"⏳ Risposta in corso con `{modello}`...")
-        try:
-            response = client.models.generate_content(
-                model=modello,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                ),
-            )
-            status_placeholder.empty()
-            return response.text
-
-        except APIError as e:
-            errori_riscontrati.append(f"`{modello}` -> Errore API {e.code}: {e.message}")
-            if e.code == 503:
-                time.sleep(1.5)
-                try:
-                    response = client.models.generate_content(
-                        model=modello,
-                        contents=contents,
-                        config=types.GenerateContentConfig(
-                            system_instruction=system_prompt,
-                        ),
-                    )
-                    status_placeholder.empty()
-                    return response.text
-                except Exception as e2:
-                    errori_riscontrati.append(f"`{modello}` (retry) -> {e2}")
-            continue
-
-        except Exception as e:
-            errori_riscontrati.append(f"`{modello}` -> {type(e).__name__}: {e}")
-            continue
-
-    status_placeholder.empty()
-    dettaglio_errori = "\n".join(f"- {err}" for err in errori_riscontrati)
-    raise RuntimeError(f"Tutti i modelli hanno fallito:\n{dettaglio_errori}")
-
 
 # ---------------------------------------------------------
 # INTERFACCIA GRAFICA E LOGICA DI CHAT
@@ -169,47 +84,52 @@ scelta_personaggio = st.selectbox(
 info_char = PERSONAGGI[scelta_personaggio]
 st.info(f"{info_char['avatar']} **{scelta_personaggio}** — *{info_char['ruolo']}*")
 
-# Reset automatico dello storico se si cambia personaggio
 if "current_char" not in st.session_state or st.session_state.current_char != scelta_personaggio:
     st.session_state.current_char = scelta_personaggio
     st.session_state.messages = []
 
-# Visualizzazione storico messaggi
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"], avatar=msg.get("avatar")):
         st.markdown(msg["content"])
 
-# Gestione dell'input dello studente e chiamata all'API
+# Generatore per lo streaming in tempo reale
+def stream_risposta(contents, system_prompt):
+    response = client.models.generate_content_stream(
+        model="gemini-3.5-flash-lite",
+        contents=contents,
+        config=types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            max_output_tokens=200,
+        )
+    )
+    for chunk in response:
+        if chunk.text:
+            yield chunk.text
+
 if prompt := st.chat_input("Scrivi un messaggio..."):
     st.session_state.messages.append({"role": "user", "content": prompt, "avatar": "🎓"})
     with st.chat_message("user", avatar="🎓"):
         st.markdown(prompt)
 
-    with st.chat_message("assistant", avatar=info_char["avatar"]):
-        status_box = st.empty()
-        try:
-            system_prompt = carica_prompt(info_char["prompt_file"])
-
-            contents_gemini = [
-                types.Content(
-                    role="user" if m["role"] == "user" else "model",
-                    parts=[types.Part.from_text(text=m["content"])],
-                )
-                for m in st.session_state.messages
-            ]
-
-            reply_text = genera_risposta_resiliente(
-                client, contents_gemini, system_prompt, status_box
+    try:
+        # Limita lo storico agli ultimi 6 messaggi per mantenere veloce l'invio
+        recent_messages = st.session_state.messages[-6:]
+        contents = [
+            types.Content(
+                role="user" if m["role"] == "user" else "model",
+                parts=[types.Part.from_text(text=m["content"])]
             )
-            st.markdown(reply_text)
+            for m in recent_messages
+        ]
 
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": reply_text,
-                "avatar": info_char["avatar"],
-            })
+        with st.chat_message("assistant", avatar=info_char["avatar"]):
+            reply_text = st.write_stream(stream_risposta(contents, info_char["prompt"]))
 
-        except Exception as e:
-            status_box.empty()
-            st.error(f"Errore di connessione:\n{str(e)}")
-            st.session_state.messages.pop()
+        st.session_state.messages.append({
+            "role": "assistant", 
+            "content": reply_text, 
+            "avatar": info_char["avatar"]
+        })
+
+    except Exception as e:
+        st.error(f"Errore di connessione: {str(e)}")
