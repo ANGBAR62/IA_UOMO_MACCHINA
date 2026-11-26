@@ -33,30 +33,32 @@ def load_prompt(file_path):
 PERSONAGGI = {
     "Bruno Martelli": {
         "ruolo": "Musica & Sintetizzatori",
-        "avatar": "🎹",
+        "avatar": "avatars/bruno_martelli.png",
         "prompt": load_prompt("prompts/bruno_martelli.txt")
     },
     "Carmen Diaz": {
         "ruolo": "Fama & Ambizione",
-        "avatar": "💃",
+        "avatar": "avatars/carmen_diaz.png",
         "prompt": load_prompt("prompts/carmen_diaz.txt")
     },
     "Leroy Johnson": {
         "ruolo": "Talento Grezzo & Istinto",
-        "avatar": "🕺",
+        "avatar": "avatars/leroy_johnson.png",
         "prompt": load_prompt("prompts/leroy_johnson.txt")
     },
     "Doris Finsecker": {
         "ruolo": "Identità & Vulnerabilità",
-        "avatar": "🎭",
+        "avatar": "avatars/doris_finsecker.png",
         "prompt": load_prompt("prompts/doris_finsecker.txt")
     },
     "Prof. Shorofsky": {
         "ruolo": "Maestro & Tradizione",
-        "avatar": "🎻",
+        "avatar": "avatars/prof_shorofsky.png",
         "prompt": load_prompt("prompts/prof_shorofsky.txt")
     }
 }
+
+USER_AVATAR = "avatars/user.png"
 
 # ---------------------------------------------------------
 # INTERFACCIA GRAFICA E LOGICA DI CHAT
@@ -71,7 +73,11 @@ scelta_personaggio = st.selectbox(
 )
 
 info_char = PERSONAGGI[scelta_personaggio]
-st.info(f"{info_char['avatar']} **{scelta_personaggio}** — *{info_char['ruolo']}*")
+col_av, col_info = st.columns([1, 8], vertical_alignment="center")
+with col_av:
+    st.image(info_char["avatar"], width=48)
+with col_info:
+    st.info(f"**{scelta_personaggio}** — *{info_char['ruolo']}*")
 
 if "current_char" not in st.session_state or st.session_state.current_char != scelta_personaggio:
     st.session_state.current_char = scelta_personaggio
@@ -96,8 +102,8 @@ def stream_risposta(contents, system_prompt):
             yield chunk.text
 
 if prompt := st.chat_input("Scrivi un messaggio..."):
-    st.session_state.messages.append({"role": "user", "content": prompt, "avatar": "🎓"})
-    with st.chat_message("user", avatar="🎓"):
+    st.session_state.messages.append({"role": "user", "content": prompt, "avatar": USER_AVATAR})
+    with st.chat_message("user", avatar=USER_AVATAR):
         st.markdown(prompt)
 
     try:
