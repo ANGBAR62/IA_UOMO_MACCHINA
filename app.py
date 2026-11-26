@@ -31,7 +31,7 @@ def load_prompt(file_path):
 # DATABASE PERSONAGGI E SYSTEM PROMPTS
 # ---------------------------------------------------------
 PERSONAGGI = {
-    "Brunao Martelli": {
+    "Bruno Martelli": {
         "ruolo": "Musica & Sintetizzatori",
         "avatar": "avatars/bruno_martelli.png",
         "prompt": load_prompt("prompts/bruno_martelli.txt")
