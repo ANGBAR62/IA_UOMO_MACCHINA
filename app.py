@@ -7,7 +7,7 @@ from google.genai import types
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="Fame AI - L'Uomo e la Macchina",
-    ppage_icon="avatars/page_icon.png",
+    page_icon="avatars/page_icon.png",
     layout="centered",
     initial_sidebar_state="collapsed"
 )
