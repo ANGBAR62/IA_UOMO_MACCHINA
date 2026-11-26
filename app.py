@@ -1,7 +1,9 @@
+import time
 from pathlib import Path
 import streamlit as st
 from google import genai
 from google.genai import types
+from google.genai.errors import APIError
 
 # ---------------------------------------------------------
 # CONFIGURAZIONE PAGINA MOBILE
@@ -58,7 +60,43 @@ PERSONAGGI = {
 def carica_prompt(nome_file: str) -> str:
     """Legge le istruzioni del personaggio dal file Markdown esterno."""
     percorso = PROMPTS_DIR / nome_file
+    if not percorso.exists():
+        raise FileNotFoundError(f"File prompt non trovato: {percorso}")
     return percorso.read_text(encoding="utf-8").strip()
+
+
+def genera_risposta_resiliente(
+    client: genai.Client,
+    contents: list[types.Content],
+    system_prompt: str
+) -> str:
+    """Tenta la generazione con retry automatico e fallback su un altro modello."""
+    modelli_da_provare = ["gemini-3.8-flash", "gemini-2.5-flash"]
+
+    for modello in modelli_da_provare:
+        # 2 tentativi per ciascun modello
+        for tentativo in range(2):
+            try:
+                response = client.models.generate_content(
+                    model=modello,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_prompt,
+                    ),
+                )
+                return response.text
+            except APIError as e:
+                # Se è un errore 503 (sovraccarico) o 429 (troppi invii ravvicinati), aspetta e riprova
+                if e.code in (503, 429):
+                    if tentativo == 0:
+                        time.sleep(2)
+                        continue
+                    else:
+                        break
+                else:
+                    raise e
+
+    raise RuntimeError("Tutti i modelli sono attualmente sovraccarichi. Riprova tra qualche secondo.")
 
 
 # ---------------------------------------------------------
@@ -92,34 +130,30 @@ if prompt := st.chat_input("Scrivi un messaggio..."):
     with st.chat_message("user", avatar="🎓"):
         st.markdown(prompt)
 
-    try:
-        system_prompt = carica_prompt(info_char["prompt_file"])
+    with st.chat_message("assistant", avatar=info_char["avatar"]):
+        with st.spinner(f"{scelta_personaggio} sta riflettendo..."):
+            try:
+                system_prompt = carica_prompt(info_char["prompt_file"])
 
-        # Ricostruzione conversazione completa per il nuovo SDK google-genai
-        contents_gemini = [
-            types.Content(
-                role="user" if m["role"] == "user" else "model",
-                parts=[types.Part.from_text(text=m["content"])],
-            )
-            for m in st.session_state.messages
-        ]
+                # Ricostruzione conversazione completa per il nuovo SDK google-genai
+                contents_gemini = [
+                    types.Content(
+                        role="user" if m["role"] == "user" else "model",
+                        parts=[types.Part.from_text(text=m["content"])],
+                    )
+                    for m in st.session_state.messages
+                ]
 
-        response = client.models.generate_content(
-            model="gemini-3.8-flash",
-            contents=contents_gemini,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-            ),
-        )
-        reply_text = response.text
+                reply_text = genera_risposta_resiliente(client, contents_gemini, system_prompt)
+                st.markdown(reply_text)
 
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": reply_text,
-            "avatar": info_char["avatar"],
-        })
-        with st.chat_message("assistant", avatar=info_char["avatar"]):
-            st.markdown(reply_text)
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": reply_text,
+                    "avatar": info_char["avatar"],
+                })
 
-    except Exception as e:
-        st.error(f"Errore di connessione: {str(e)}")
+            except Exception as e:
+                st.error(f"Errore di connessione: {str(e)}")
+                # Rimuove l'ultimo messaggio utente dallo storico in caso di errore
+                st.session_state.messages.pop()
