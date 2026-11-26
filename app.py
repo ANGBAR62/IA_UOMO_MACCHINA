@@ -19,11 +19,8 @@ if "GEMINI_API_KEY" not in st.secrets:
     st.error("API Key non configurata nei Secrets di Streamlit.")
     st.stop()
 
-# Timeout di 20 secondi per evitare che l'app resti appesa all'infinito
-client = genai.Client(
-    api_key=st.secrets["GEMINI_API_KEY"],
-    http_options={"timeout": 20}
-)
+# NOTA: non passiamo timeout numerici ambigui (in alcune versioni SDK sono in ms!)
+client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
 # ---------------------------------------------------------
 # CONFIGURAZIONE PERSONAGGI (METADATI + FILE PROMPT ESTERNI)
@@ -69,26 +66,27 @@ def carica_prompt(nome_file: str) -> str:
 
 
 @st.cache_data(ttl=3600)
-def ottieni_modelli_disponibili(_client: genai.Client) -> list[str]:
-    """Recupera al massimo i 3 migliori modelli Gemini attivi e stabili."""
+def ottieni_modelli_reali(_client: genai.Client) -> tuple[list[str], str]:
+    """Interroga l'API e restituisce i modelli Gemini reali disponibili sull'account."""
     modelli_validi = []
-    parole_da_escludere = ["image", "tts", "embedding", "vision", "aqa", "exp", "1.0", "1.5", "2.0"]
+    escludi = ["image", "tts", "embedding", "vision", "aqa", "1.0", "1.5"]
 
     try:
         for m in _client.models.list():
-            azioni = getattr(m, "supported_actions", None) or []
             nome = m.name.replace("models/", "")
             n_low = nome.lower()
-
-            if "generateContent" in azioni and "gemini" in n_low:
-                if not any(x in n_low for x in parole_da_escludere):
+            # Verifica compatibilità con generateContent (supporta sia supported_actions che supported_generation_methods)
+            azioni = getattr(m, "supported_actions", None) or getattr(m, "supported_generation_methods", None) or []
+            
+            if "gemini" in n_low and not any(x in n_low for x in escludi):
+                if not azioni or "generateContent" in azioni:
                     modelli_validi.append(nome)
-    except Exception:
-        pass
+    except Exception as e:
+        return [], f"Errore durante client.models.list(): {e}"
 
     def priorita(nome_modello: str) -> int:
         n = nome_modello.lower()
-        if "flash" in n and "lite" not in n and "preview" not in n:
+        if "flash" in n and "lite" not in n and "preview" not in n and "exp" not in n:
             return 0
         if "flash" in n and "lite" not in n:
             return 1
@@ -99,8 +97,7 @@ def ottieni_modelli_disponibili(_client: genai.Client) -> list[str]:
         return 4
 
     modelli_validi.sort(key=priorita)
-    # Restituisce al massimo i primi 3 modelli per evitare attese lunghe
-    return modelli_validi[:3] if modelli_validi else ["gemini-3.8-flash"]
+    return modelli_validi[:4], ""
 
 
 def genera_risposta_resiliente(
@@ -109,11 +106,16 @@ def genera_risposta_resiliente(
     system_prompt: str,
     status_placeholder
 ) -> str:
-    """Tenta la generazione sui migliori 3 modelli disponibili con feedback visivo."""
-    modelli_da_provare = ottieni_modelli_disponibili(client)
+    """Tenta la generazione sui modelli reali rilevati e riporta errori dettagliati se fallisce."""
+    modelli_da_provare, err_lista = ottieni_modelli_reali(client)
+
+    if not modelli_da_provare:
+        raise RuntimeError(f"Impossibile recuperare la lista modelli dall'API. Dettaglio: {err_lista}")
+
+    errori_riscontrati = []
 
     for modello in modelli_da_provare:
-        status_placeholder.caption(f"⏳ Connessione a `{modello}`...")
+        status_placeholder.caption(f"⏳ Risposta in corso con `{modello}`...")
         try:
             response = client.models.generate_content(
                 model=modello,
@@ -126,7 +128,7 @@ def genera_risposta_resiliente(
             return response.text
 
         except APIError as e:
-            # Se sovraccarico (503), fa un solo rapido retry dopo 1.5s, poi cambia modello
+            errori_riscontrati.append(f"`{modello}` -> Errore API {e.code}: {e.message}")
             if e.code == 503:
                 time.sleep(1.5)
                 try:
@@ -139,18 +141,17 @@ def genera_risposta_resiliente(
                     )
                     status_placeholder.empty()
                     return response.text
-                except Exception:
-                    continue
-            # Per 404, 429 o altri errori passa subito al modello successivo
+                except Exception as e2:
+                    errori_riscontrati.append(f"`{modello}` (retry) -> {e2}")
             continue
-        except Exception:
-            # Gestisce eventuali timeout di rete passando al modello successivo
+
+        except Exception as e:
+            errori_riscontrati.append(f"`{modello}` -> {type(e).__name__}: {e}")
             continue
 
     status_placeholder.empty()
-    raise RuntimeError(
-        f"Nessun modello ha risposto in tempo utile (testati: {', '.join(modelli_da_provare)})."
-    )
+    dettaglio_errori = "\n".join(f"- {err}" for err in errori_riscontrati)
+    raise RuntimeError(f"Tutti i modelli hanno fallito:\n{dettaglio_errori}")
 
 
 # ---------------------------------------------------------
@@ -210,5 +211,5 @@ if prompt := st.chat_input("Scrivi un messaggio..."):
 
         except Exception as e:
             status_box.empty()
-            st.error(f"Errore di connessione: {str(e)}")
+            st.error(f"Errore di connessione:\n{str(e)}")
             st.session_state.messages.pop()
