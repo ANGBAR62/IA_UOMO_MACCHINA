@@ -71,7 +71,7 @@ def genera_risposta_resiliente(
     system_prompt: str
 ) -> str:
     """Tenta la generazione con retry automatico e fallback su un altro modello."""
-    modelli_da_provare = ["gemini-3.8-flash", "gemini-2.5-flash"]
+    modelli_da_provare = ["gemini-3.8-flash", "gemini-3.8-flash-lite", "gemini-3.8-pro"]
 
     for modello in modelli_da_provare:
         # 2 tentativi per ciascun modello
