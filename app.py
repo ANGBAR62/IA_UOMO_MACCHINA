@@ -69,7 +69,8 @@ col_logo, col_title = st.columns([1, 7], vertical_alignment="center")
 with col_logo:
     st.image("avatars/page_icon.jpg", width=64)
 with col_title:
-    st.title("Fame AI: L'Uomo e la Macchina")
+    st.subheader("Fame AI: L'Uomo e la Macchina")
+
 scelta_personaggio = st.selectbox(
     "Scegli il personaggio con cui dialogare:",
     options=list(PERSONAGGI.keys()),
