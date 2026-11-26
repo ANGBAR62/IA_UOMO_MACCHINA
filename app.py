@@ -6,7 +6,7 @@ from google.genai import types
 # CONFIGURAZIONE PAGINA MOBILE
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="Fame AI - L'Uomo e la Macchina",
+    page_title="Fame AIA - L'Uomo e la Macchina",
     page_icon="avatars/page_icon.png",
     layout="centered",
     initial_sidebar_state="collapsed"
