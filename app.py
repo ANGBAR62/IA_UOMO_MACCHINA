@@ -7,7 +7,7 @@ from google.genai import types
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="Fame AI - L'Uomo e la Macchina",
-    page_icon="avatars/page_icon.png",
+    page_icon="avatars/page_icon.jpg",
     layout="centered",
     initial_sidebar_state="collapsed"
 )
@@ -63,9 +63,13 @@ USER_AVATAR = "avatars/user.png"
 # ---------------------------------------------------------
 # INTERFACCIA GRAFICA E LOGICA DI CHAT
 # ---------------------------------------------------------
-st.title("🎭 Fame AI: L'Uomo e la Macchina")
-st.caption("Laboratorio Interattivo di Dialogo Filosofico")
-
+#st.title("🎭 Fame AI: L'Uomo e la Macchina")
+#st.caption("Laboratorio Interattivo di Dialogo Filosofico")
+col_logo, col_title = st.columns([1, 7], vertical_alignment="center")
+with col_logo:
+    st.image("avatars/page_icon.jpg", width=64)
+with col_title:
+    st.title("Fame AI: L'Uomo e la Macchina")
 scelta_personaggio = st.selectbox(
     "Scegli il personaggio con cui dialogare:",
     options=list(PERSONAGGI.keys()),
