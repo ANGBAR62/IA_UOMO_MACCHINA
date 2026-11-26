@@ -65,7 +65,7 @@ def carica_prompt(nome_file: str) -> str:
 # INTERFACCIA GRAFICA E LOGICA DI CHAT
 # ---------------------------------------------------------
 st.title("🎭 Fame AI: L'Uomo e la Macchina")
-st.caption("Laboratorio Interattivo di Dialogo Filosofico")
+st.caption("Laboratorio IIInterattivo di Dialogo Filosofico")
 
 scelta_personaggio = st.selectbox(
     "Scegli il personaggio con cui dialogare:",
