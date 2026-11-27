@@ -74,7 +74,7 @@ with col_title:
 scelta_personaggio = st.selectbox(
     "Scegli il personaggio con cui dialogare:",
     options=list(PERSONAGGI.keys()),
-    index=2
+    index=0
 )
 
 info_char = PERSONAGGI[scelta_personaggio]
